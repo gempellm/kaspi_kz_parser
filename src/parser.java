@@ -5,9 +5,15 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.*;
 import org.openqa.selenium.NoSuchElementException;
 
+import java.io.BufferedWriter;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.ArrayList;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.Random;
 
 // 1. Скопировать ссылку на карточку.
 // 2. Открыть новое окно по ссылке.
@@ -18,7 +24,7 @@ import java.util.ArrayList;
 // 7. Закрыть старое окно, повторить пункт 1.
 // 8. Если не ссылки на следующую страницу, закрыть окно.
 
-import java.io.IOException;
+
 
 class Deal {
     private String shop;
@@ -60,12 +66,13 @@ class Product {
 }
 
 public class parser {
+    public final static String categoryPath = "https://kaspi.kz/shop/c/oxygen%20concentrators/";
 
     public final static ChromeOptions chromeOptions = new ChromeOptions().addArguments("--headless").addArguments("--log-level=3");
 
+    public static boolean nextFlag = false;
+
     public static ArrayList<Product> products = new ArrayList<>();
-
-
 
     public static void addProduct(Product product) {
         products.add(product);
@@ -83,6 +90,29 @@ public class parser {
         }
     }
 
+    public static void setNextFlag(boolean flag) {
+        nextFlag = flag;
+    }
+
+    public static void writeProducts() throws IOException {
+        File exportFile = new File(Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
+                + "-" + Calendar.getInstance().get(Calendar.MONTH)
+                + "-" + new Random().nextInt(10001)
+                + ".txt");
+        FileWriter exportWriter = new FileWriter(exportFile);
+        BufferedWriter writer = new BufferedWriter(exportWriter);
+        for (Product product : products) {
+            StringBuilder line = new StringBuilder(product.getName());
+            ArrayList<Deal> deals = product.getDeals();
+            for (Deal deal : deals) {
+                line.append("\t").append(deal.getShop()).append("\t").append(deal.getPrice()).append("₸");
+            }
+            writer.write(line.toString());
+            writer.write(System.lineSeparator());
+        }
+        writer.close();
+    }
+
     public static void parseProducts(List<WebElement> goods) {
         for (int i = 0; i < goods.size(); i++) {
             Product product = new Product(goods.get(i).getText());
@@ -98,7 +128,7 @@ public class parser {
             int priceId = 0;
 
             for (int j = 0; j < shops.size(); j++) {
-                Deal deal = new Deal(j + 1 + ". " + shops.get(j).getText(),
+                Deal deal = new Deal(shops.get(j).getText(),
                         Integer.parseInt(prices.get(priceId).getText().replaceAll(" ", "").replaceAll("₸", "")));
                 product.addDeal(deal);
                 priceId += 2;
@@ -111,38 +141,28 @@ public class parser {
         }
     }
 
-    public static void main(String[] args) {
-        Date date = java.util.Calendar.getInstance().getTime();
-        System.out.println(date);
-
+    public static void main(String[] args) throws IOException {
         System.setProperty("webdriver.chrome.driver", "C:\\chromedriver.exe");
 
-
         WebDriver driver = new ChromeDriver(chromeOptions);
+        driver.get(categoryPath);
 
-        driver.get("https://kaspi.kz/shop/c/medical%20equipment/");
-
-        boolean nextFlag = driver.findElement(By.className("_disabled")).getText().equals("Следующая →");
-        System.out.println(nextFlag);
         int page = 1;
 
         while (!nextFlag) {
             List<WebElement> products = driver.findElements(By.className("item-card__name-link"));
-
             parseProducts(products);
-            printProducts();
-
             page++;
-
-            driver.get("https://kaspi.kz/shop/c/medical%20equipment/?page=" + page);
+            driver.get(categoryPath + "?page=" + page);
             try {
-                nextFlag = driver.findElement(By.className("_disabled")).getText().equals("Следующая →");
+                boolean flag = driver.findElement(By.className("_disabled")).getText().equals("Следующая →");
+                List<WebElement> finalProducts = driver.findElements(By.className("item-card__name-link"));
+                parseProducts(finalProducts);
+                setNextFlag(flag);
             } catch(NoSuchElementException e) {
-                e.printStackTrace();
             }
         }
-
-
-
+        driver.quit();
+        writeProducts();
     }
 }
