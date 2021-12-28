@@ -14,6 +14,11 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Random;
+import java.lang.Thread;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 // 1. Скопировать ссылку на карточку.
 // 2. Открыть новое окно по ссылке.
@@ -24,7 +29,48 @@ import java.util.Random;
 // 7. Закрыть старое окно, повторить пункт 1.
 // 8. Если не ссылки на следующую страницу, закрыть окно.
 
+class ProductParseThread extends Thread {
+    public final static ChromeOptions chromeOptions = new ChromeOptions().addArguments("--headless").addArguments("--log-level=3");
 
+    private CountDownLatch latch;
+    private String name;
+    private String href;
+
+    ProductParseThread(String productName, String productHref, CountDownLatch latch) {
+        this.name = productName;
+        this.href = productHref;
+        this.latch = latch;
+    }
+
+    @Override
+    public void run() {
+        Product product = new Product(this.name);
+
+        String link = this.href;
+
+        WebDriver cardDriver = new ChromeDriver();
+        // cardDriver.manage().timeouts().implicitlyWait(60, TimeUnit.SECONDS);
+        cardDriver.get(link);
+
+        List<WebElement> shops = cardDriver.findElements(By.xpath("//td/a"));
+        List<WebElement> prices = cardDriver.findElements(By.className("sellers-table__price-cell-text"));
+
+        int priceId = 0;
+
+        for (int j = 0; j < shops.size(); j++) {
+            Deal deal = new Deal(shops.get(j).getText(),
+                    Integer.parseInt(prices.get(priceId).getText().replaceAll(" ", "").replaceAll("₸", "")));
+            product.addDeal(deal);
+            priceId += 2;
+        }
+
+        parser.addProduct(product);
+        shops.clear();
+        prices.clear();
+        cardDriver.quit();
+        this.latch.countDown();
+    }
+}
 
 class Deal {
     private String shop;
@@ -66,6 +112,14 @@ class Product {
 }
 
 public class parser {
+
+
+
+    public final static String[] categoryPaths = new String[] {
+            "https://kaspi.kz/shop/c/disinfection%20germicidal%20lamps/",
+            "https://kaspi.kz/shop/c/oxygen%20concentrators/"
+    };
+
     public final static String categoryPath = "https://kaspi.kz/shop/c/oxygen%20concentrators/";
 
     public final static ChromeOptions chromeOptions = new ChromeOptions().addArguments("--headless").addArguments("--log-level=3");
@@ -83,7 +137,7 @@ public class parser {
             System.out.println(product.getName());
             ArrayList<Deal> deals = product.getDeals();
             for (Deal deal : deals) {
-                System.out.format("%-30.30s %-30.30s%n", deal.getShop(), deal.getPrice() + "₸");
+                System.out.format("%-60.60s %-30.30s%n", deal.getShop(), deal.getPrice());
                 System.out.println();
             }
             System.out.println("= = = = = = = = = = =");
@@ -105,7 +159,7 @@ public class parser {
             StringBuilder line = new StringBuilder(product.getName());
             ArrayList<Deal> deals = product.getDeals();
             for (Deal deal : deals) {
-                line.append("\t").append(deal.getShop()).append("\t").append(deal.getPrice()).append("₸");
+                line.append("\t").append(deal.getShop()).append("\t").append(deal.getPrice());
             }
             writer.write(line.toString());
             writer.write(System.lineSeparator());
@@ -113,45 +167,45 @@ public class parser {
         writer.close();
     }
 
+
+
     public static void parseProducts(List<WebElement> goods) {
+        CountDownLatch latch = new CountDownLatch(goods.size());
+        ExecutorService executor = Executors.newFixedThreadPool(goods.size());
+
         for (int i = 0; i < goods.size(); i++) {
-            Product product = new Product(goods.get(i).getText());
-
-            String link = goods.get(i).getAttribute("href");
-
-            WebDriver cardDriver = new ChromeDriver(chromeOptions);
-            cardDriver.get(link);
-
-            List<WebElement> shops = cardDriver.findElements(By.xpath("//td/a"));
-            List<WebElement> prices = cardDriver.findElements(By.className("sellers-table__price-cell-text"));
-
-            int priceId = 0;
-
-            for (int j = 0; j < shops.size(); j++) {
-                Deal deal = new Deal(shops.get(j).getText(),
-                        Integer.parseInt(prices.get(priceId).getText().replaceAll(" ", "").replaceAll("₸", "")));
-                product.addDeal(deal);
-                priceId += 2;
-            }
-
-            addProduct(product);
-            shops.clear();
-            prices.clear();
-            cardDriver.quit();
+            executor.execute(new ProductParseThread(goods.get(i).getText(), goods.get(i).getAttribute("href"), latch));
+        }
+        executor.shutdown();
+        try {
+            latch.await();
+        } catch(InterruptedException ex) {
+            System.out.println(ex);
         }
     }
 
     public static void main(String[] args) throws IOException {
         System.setProperty("webdriver.chrome.driver", "C:\\chromedriver.exe");
 
-        WebDriver driver = new ChromeDriver(chromeOptions);
+        WebDriver driver = new ChromeDriver();
         driver.get(categoryPath);
 
         int page = 1;
 
         while (!nextFlag) {
             List<WebElement> products = driver.findElements(By.className("item-card__name-link"));
-            parseProducts(products);
+
+            List<WebElement> temp = new ArrayList<>();
+
+            for (int i = 0; i < products.size(); i++) {
+                temp.add(products.get(i));
+                if (i % 5 == 0 && i != 0) {
+                    parseProducts(temp);
+                    temp.clear();
+                }
+            }
+
+            parseProducts(temp);
             page++;
             driver.get(categoryPath + "?page=" + page);
             try {
@@ -163,6 +217,7 @@ public class parser {
             }
         }
         driver.quit();
+
         writeProducts();
     }
 }
