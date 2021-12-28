@@ -199,13 +199,16 @@ public class parser {
 
             for (int i = 0; i < products.size(); i++) {
                 temp.add(products.get(i));
-                if (i % 5 == 0 && i != 0) {
+                if ((i + 1) % 6 == 0 && i != 0) {
                     parseProducts(temp);
                     temp.clear();
                 }
             }
 
-            parseProducts(temp);
+            if (temp.size() > 0) {
+                parseProducts(temp);
+            }
+
             page++;
             driver.get(categoryPath + "?page=" + page);
             try {
